@@ -29,6 +29,9 @@
             "label": "run",
             "type": "shell",
             "command": "${workspaceFolder}/window.exe",
+            "args": [
+                "$A2/teapot.obj"
+            ],
             "group": {
                 "kind": "none",
                 "isDefault": false
@@ -40,6 +43,9 @@
             "dependsOn": ["build"],
             "type": "shell",
             "command": "${workspaceFolder}/window.exe",
+            "args": [
+                "A2/teapot.obj"
+            ],
             "problemMatcher": []
         }
     ]
