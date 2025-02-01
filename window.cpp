@@ -18,8 +18,8 @@ bool mouse_down;
 bool left_button;
 float previous_x, previous_y;
 float y_drag = 0.0f, x_drag = 0.0f;
-float sensitivity = 0.01;
-float scalar = 0.1;
+float sensitivity = 0.005;
+float z_distance = 50.0f;
 
 GLchar *ReadFromFile(const char *file)
 {
@@ -142,40 +142,28 @@ void display()
     glUseProgram(program);
     GLint mvpLoc = glGetUniformLocation(program, "mvp");
 
-    cy::Matrix3<float> scalarMat;
-    scalarMat.SetScale(scalar);
+    // TRANSFORMATION MATRIX
     cy::Matrix3f xRotation;
     xRotation.SetRotationX(x_drag);
     cy::Matrix3f zRotation;
     zRotation.SetRotationZ(y_drag);
 
-    cy::Matrix4<float> scalarMat4(scalarMat);
     cy::Matrix4<float> xRotation4(xRotation);
     cy::Matrix4<float> zRotation4(zRotation);
 
-    cy::Matrix4<float> transformation = scalarMat4 * xRotation4 * zRotation4;
+    // PERSPECTIVE MATRIX
+    cy::Matrix4<float> perspective;
+    perspective.SetPerspective(1.0472f, 1.0f, 0.1f, 100.0f);
+
+    cy::Matrix4<float> translation;
+    translation.SetTranslation(cy::Vec3f(0.0f, -5.0f, -z_distance));
+
+    cy::Matrix4<float> transformation = perspective * translation * xRotation4 * zRotation4;
 
     float matrixData1[16];
     transformation.Get(matrixData1);
 
     const GLfloat *matrix = matrixData1;
-
-    // Print the matrix values
-    // std::cout << "Matrix 1" << std::endl;
-    // for (int i = 0; i < 4; ++i)
-    // {
-    //     for (int j = 0; j < 4; ++j)
-    //     {
-    //         std::cout << matrixData1[i * 4 + j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-    // GLfloat matrix[16] = {
-    //     scalar, 0.0, 0.0, 0.0,
-    //     0.0, scalar, 0.0, 0.0,
-    //     0.0, 0.0, scalar, 0.0,
-    //     0.0, 0.0, 0.0, 1.0};
 
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, matrix);
 
@@ -213,7 +201,6 @@ void mouse(int button, int state, int x, int y)
     // right mouse: Distance
     mouse_down = (state == GLUT_DOWN);
     left_button = (button == GLUT_LEFT_BUTTON);
-    std::cout << left_button << std::endl;
 }
 void mouseMotion(int x, int y)
 {
@@ -222,14 +209,11 @@ void mouseMotion(int x, int y)
     {
         y_drag += (x - previous_x) * sensitivity;
         x_drag += (y - previous_y) * sensitivity;
-        std::cout << "Mouse drPag left" << std::endl;
     }
     if (mouse_down && !left_button)
     {
-        scalar += (x - previous_x) * sensitivity;
-        std::cout << "Mouse drag right" << std::endl;
+        z_distance += (x - previous_x);
     }
-
     previous_x = x;
     previous_y = y;
 }
@@ -261,9 +245,9 @@ int main(int argc, char **argv)
     glutInit(&argc, argv);
 
     // Create Window
-    glutInitWindowSize(600, 700);
+    glutInitWindowSize(700, 700);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
-    glutCreateWindow("Hello World");
+    glutCreateWindow("A2 - Transformations");
 
     // Initialize GLEW
     GLenum err = glewInit();
@@ -272,10 +256,23 @@ int main(int argc, char **argv)
         std::cerr << "Error: " << glewGetErrorString(err) << std::endl;
         return -1;
     }
-    std::cout << "File: " << argv[1] << std::endl;
+
+    std::string filepath;
+    if (argc > 1)
+    {
+        filepath = argv[1];
+    }
+    else
+    {
+        std::cout << "Enter the file location of your .obj file: ";
+        std::getline(std::cin, filepath);
+
+        // std::cin >> filepath;
+    }
+
     bool ObjectLoaded;
-    bool status = obj.LoadFromFileObj(argv[1], true, &std::cout);
-    std::cout << status << std::endl;
+    bool status = obj.LoadFromFileObj(filepath.c_str(), true, &std::cout);
+    std::cout << status << filepath << std::endl;
 
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);

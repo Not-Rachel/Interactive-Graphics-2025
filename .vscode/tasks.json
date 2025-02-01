@@ -30,7 +30,7 @@
             "type": "shell",
             "command": "${workspaceFolder}/window.exe",
             "args": [
-                "$A2/teapot.obj"
+                "${input:objFileLocation}"
             ],
             "group": {
                 "kind": "none",
@@ -44,9 +44,16 @@
             "type": "shell",
             "command": "${workspaceFolder}/window.exe",
             "args": [
-                "A2/teapot.obj"
+                "${input:objFileLocation}"
             ],
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "objFileLocation",
+            "type": "promptString",
+            "description": "File location of your .obj file:"
         }
     ]
 }
