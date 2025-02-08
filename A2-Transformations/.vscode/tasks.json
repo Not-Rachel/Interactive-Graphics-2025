@@ -16,7 +16,7 @@
                 "-lfreeglut",
                 "-lopengl32",
                 "-lglu32",
-                "-lglew32"
+                "-lglew32",
             ],
             "group": {
                 "kind": "build",

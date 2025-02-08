@@ -23,7 +23,6 @@ float z_distance = 50.0f;
 
 GLchar *ReadFromFile(const char *file)
 {
-
     std::ifstream inputFile(file);
     if (!inputFile.is_open())
     {
@@ -99,8 +98,7 @@ void display()
 {
     // INIT //
     //      //
-
-    GLuint program = LoadShader("A2\\shader.vert", "A2\\shader.frag");
+    GLuint program = LoadShader("shader.vert", "shader.frag");
 
     // Vertex array object
     GLuint vertex_array_obj;
@@ -109,31 +107,68 @@ void display()
 
     // Vertex Buffer Object
     std::vector<GLfloat> positions;
+    std::vector<GLfloat> normals;
 
-    for (int i = 0; i < obj.NV(); i++)
+    for (unsigned int i = 0; i < obj.NF(); ++i)
     {
-        const cy::Vec3f &vertex = obj.V(i);
-        // std::cout << "Vertex " << i << ": " << vertex.x << ", " << vertex.y << ", " << vertex.z << std::endl;
-        positions.push_back(static_cast<GLfloat>(vertex.x));
-        positions.push_back(static_cast<GLfloat>(vertex.y));
-        positions.push_back(static_cast<GLfloat>(vertex.z));
+        cy::TriMesh::TriFace &face = obj.F(i);
+        cy::Vec3f &vertex1 = obj.V(face.v[0]);
+        cy::Vec3f &vertex2 = obj.V(face.v[1]);
+        cy::Vec3f &vertex3 = obj.V(face.v[2]);
+
+        positions.push_back(vertex1.x);
+        positions.push_back(vertex1.y);
+        positions.push_back(vertex1.z);
+        positions.push_back(vertex2.x);
+        positions.push_back(vertex2.y);
+        positions.push_back(vertex2.z);
+        positions.push_back(vertex3.x);
+        positions.push_back(vertex3.y);
+        positions.push_back(vertex3.z);
+
+        cy::TriMesh::TriFace &Nface = obj.FN(i);
+        cy::Vec3f &normal1 = obj.VN(Nface.v[0]);
+        cy::Vec3f &normal2 = obj.VN(Nface.v[1]);
+        cy::Vec3f &normal3 = obj.VN(Nface.v[2]);
+
+        normals.push_back(normal1.x);
+        normals.push_back(normal1.y);
+        normals.push_back(normal1.z);
+        normals.push_back(normal2.x);
+        normals.push_back(normal2.y);
+        normals.push_back(normal2.z);
+        normals.push_back(normal3.x);
+        normals.push_back(normal3.y);
+        normals.push_back(normal3.z);
     }
 
-    int num_vertices = obj.NV();
+    int num_vertices = obj.NF() * 3;
+
+    // POSITIONS BUFFER
     GLuint buffer;
     glGenBuffers(1, &buffer);
     glBindBuffer(GL_ARRAY_BUFFER, buffer); // Bind something, all buffer operations will use this buffer
     glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(GLfloat),
                  positions.data(),
                  GL_STATIC_DRAW); // Not planning to modify data frequently
-    //
     GLuint pos = glGetAttribLocation(program, "pos");
     glEnableVertexAttribArray(pos);
     glVertexAttribPointer( // How to interpret data
         pos, 3, GL_FLOAT,  // Will use previously binded buffer, 3d vector of floats
         GL_FALSE, 0, (GLvoid *)0);
 
-    // Check for linker errors
+    // NORMAL BUFFER
+    GLuint normalBuffer;
+    glGenBuffers(1, &normalBuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, normalBuffer); // Bind something, all buffer operations will use this buffer
+    glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat),
+                 normals.data(),
+                 GL_STATIC_DRAW); // Not planning to modify data frequently
+    GLuint normal = glGetAttribLocation(program, "normal");
+    glEnableVertexAttribArray(normal);
+    glVertexAttribPointer(   // How to interpret data
+        normal, 3, GL_FLOAT, // Will use previously binded buffer, 3d vector of floats
+        GL_FALSE, 0, (GLvoid *)0);
 
     // !RENDERING!
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -141,6 +176,8 @@ void display()
 
     glUseProgram(program);
     GLint mvpLoc = glGetUniformLocation(program, "mvp");
+    GLint mvLoc = glGetUniformLocation(program, "mv");
+    GLint mNormLoc = glGetUniformLocation(program, "mNorm");
 
     // TRANSFORMATION MATRIX
     cy::Matrix3f xRotation;
@@ -158,19 +195,51 @@ void display()
     cy::Matrix4<float> translation;
     translation.SetTranslation(cy::Vec3f(0.0f, -5.0f, -z_distance));
 
-    cy::Matrix4<float> transformation = perspective * translation * xRotation4 * zRotation4;
+    cy::Matrix4<float> transformation = translation * xRotation4 * zRotation4;
+    cy::Matrix4<float> viewMatrix;
 
-    float matrixData1[16];
-    transformation.Get(matrixData1);
+    viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, 10.0f), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
+    float viewMatrixData[16];
+    viewMatrix.Get(viewMatrixData);
 
-    const GLfloat *matrix = matrixData1;
+    cy::Matrix4<float> modelView = viewMatrix * transformation;
+    cy::Matrix4<float> modelViewPerspective = perspective * modelView;
 
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, matrix);
+    cy::Matrix3<float> normalMatrix = modelView.GetSubMatrix3().GetTranspose().GetInverse();
 
-    // Set point size
-    glPointSize(2.0f);
+    // std::cout << "Normal Matrix:" << std::endl;
 
-    glDrawArrays(GL_POINTS,
+    // float normalMatrixData[9];
+    // normalMatrix.Get(normalMatrixData);
+    // for (int i = 0; i < 3; ++i)
+    // {
+    //     for (int j = 0; j < 3; ++j)
+    //     {
+    //         std::cout << normalMatrixData[i * 3 + j] << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+    float mvpData[16], normalData[9], mvData[16];
+    modelViewPerspective.Get(mvpData);
+    normalMatrix.Get(normalData);
+    modelView.Get(mvData);
+
+    const GLfloat *mvp = mvpData;
+    const GLfloat *Nmatrix = normalData;
+    const GLfloat *mv = mvData;
+
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
+    glUniformMatrix4fv(mvLoc, 1, GL_FALSE, mv);
+    glUniformMatrix3fv(mNormLoc, 1, GL_FALSE, Nmatrix);
+
+    // Fragment Shader:
+    GLint lightPosLoc = glGetUniformLocation(program, "lightPos");
+    GLint alphaLoc = glGetUniformLocation(program, "alpha");
+
+    glUniform3f(lightPosLoc, 1.0f, 1.0f, 1.0f);
+    glUniform1f(alphaLoc, 1.0f);
+
+    glDrawArrays(GL_TRIANGLES,
                  0,
                  num_vertices);
 
@@ -219,7 +288,6 @@ void mouseMotion(int x, int y)
 }
 void mousePassive(int x, int y)
 {
-    // Handle mouse input
     // While button not down
 }
 void reshape(int x, int y)
@@ -228,14 +296,6 @@ void reshape(int x, int y)
 }
 void idle()
 {
-    // handle animations
-    // glClearColor(red, 0, 0, 0);
-    // red += 0.02;
-
-    // Figure out how much time has passed
-    // glutGet(GLUT_ELAPSED_TIME)
-
-    // Tell GLUT to redraw
     glutPostRedisplay(); // Do not call directly
 }
 
@@ -266,8 +326,6 @@ int main(int argc, char **argv)
     {
         std::cout << "Enter the file location of your .obj file: ";
         std::getline(std::cin, filepath);
-
-        // std::cin >> filepath;
     }
 
     bool ObjectLoaded;
