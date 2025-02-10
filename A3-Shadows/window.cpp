@@ -13,13 +13,18 @@
 // #include "C:/msys64/mingw64/include/GL/freeglut.h"
 
 // Global
-cy::TriMesh obj;
 bool mouse_down;
 bool left_button;
 float previous_x, previous_y;
 float y_drag = 0.0f, x_drag = 0.0f;
 float sensitivity = 0.005;
 float z_distance = 50.0f;
+int num_vertices;
+
+GLuint program;
+GLfloat mvp[16];
+GLfloat mv[16];
+GLfloat Nmatrix[9];
 
 GLchar *ReadFromFile(const char *file)
 {
@@ -93,13 +98,45 @@ GLuint LoadShader(const char *vs_path, const char *fs_path)
 
     return program;
 }
-
-void display()
+void setMatrices()
 {
-    // INIT //
-    //      //
-    GLuint program = LoadShader("shader.vert", "shader.frag");
+    // TRANSFORMATION MATRIX
+    cy::Matrix3f xRotation;
+    xRotation.SetRotationX(x_drag);
+    cy::Matrix3f zRotation;
+    zRotation.SetRotationZ(y_drag);
 
+    cy::Matrix4<float> xRotation4(xRotation);
+    cy::Matrix4<float> zRotation4(zRotation);
+
+    // PERSPECTIVE MATRIX
+    cy::Matrix4<float> perspective;
+    perspective.SetPerspective(1.0472f, 1.0f, 0.1f, 100.0f);
+
+    cy::Matrix4<float> translation;
+    translation.SetTranslation(cy::Vec3f(0.0f, -5.0f, -z_distance));
+
+    cy::Matrix4<float> transformation = translation * xRotation4 * zRotation4;
+    cy::Matrix4<float> viewMatrix;
+
+    viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, 10.0f), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
+    float viewMatrixData[16];
+    viewMatrix.Get(viewMatrixData);
+
+    cy::Matrix4<float> modelView = viewMatrix * transformation;
+    cy::Matrix4<float> modelViewPerspective = perspective * modelView;
+    cy::Matrix3<float> normalMatrix = modelView.GetSubMatrix3().GetTranspose().GetInverse();
+
+    modelViewPerspective.Get(mvp);
+    normalMatrix.Get(Nmatrix);
+    modelView.Get(mv);
+}
+
+void init(cy::TriMesh obj)
+{
+    setMatrices();
+
+    program = LoadShader("shader.vert", "shader.frag");
     // Vertex array object
     GLuint vertex_array_obj;
     glGenVertexArrays(1, &vertex_array_obj);
@@ -108,6 +145,7 @@ void display()
     // Vertex Buffer Object
     std::vector<GLfloat> positions;
     std::vector<GLfloat> normals;
+    obj.ComputeNormals(false);
 
     for (unsigned int i = 0; i < obj.NF(); ++i)
     {
@@ -126,10 +164,10 @@ void display()
         positions.push_back(vertex3.y);
         positions.push_back(vertex3.z);
 
-        cy::TriMesh::TriFace &Nface = obj.FN(i);
-        cy::Vec3f &normal1 = obj.VN(Nface.v[0]);
-        cy::Vec3f &normal2 = obj.VN(Nface.v[1]);
-        cy::Vec3f &normal3 = obj.VN(Nface.v[2]);
+        // cy::TriMesh::TriFace &Nface = obj.F(i);
+        cy::Vec3f &normal1 = obj.VN(face.v[0]);
+        cy::Vec3f &normal2 = obj.VN(face.v[1]);
+        cy::Vec3f &normal3 = obj.VN(face.v[2]);
 
         normals.push_back(normal1.x);
         normals.push_back(normal1.y);
@@ -142,7 +180,7 @@ void display()
         normals.push_back(normal3.z);
     }
 
-    int num_vertices = obj.NF() * 3;
+    num_vertices = obj.NF() * 3;
 
     // POSITIONS BUFFER
     GLuint buffer;
@@ -169,6 +207,11 @@ void display()
     glVertexAttribPointer(   // How to interpret data
         normal, 3, GL_FLOAT, // Will use previously binded buffer, 3d vector of floats
         GL_FALSE, 0, (GLvoid *)0);
+}
+
+void display()
+{
+    // setMatrices();
 
     // !RENDERING!
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -179,55 +222,6 @@ void display()
     GLint mvLoc = glGetUniformLocation(program, "mv");
     GLint mNormLoc = glGetUniformLocation(program, "mNorm");
 
-    // TRANSFORMATION MATRIX
-    cy::Matrix3f xRotation;
-    xRotation.SetRotationX(x_drag);
-    cy::Matrix3f zRotation;
-    zRotation.SetRotationZ(y_drag);
-
-    cy::Matrix4<float> xRotation4(xRotation);
-    cy::Matrix4<float> zRotation4(zRotation);
-
-    // PERSPECTIVE MATRIX
-    cy::Matrix4<float> perspective;
-    perspective.SetPerspective(1.0472f, 1.0f, 0.1f, 100.0f);
-
-    cy::Matrix4<float> translation;
-    translation.SetTranslation(cy::Vec3f(0.0f, -5.0f, -z_distance));
-
-    cy::Matrix4<float> transformation = translation * xRotation4 * zRotation4;
-    cy::Matrix4<float> viewMatrix;
-
-    viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, 10.0f), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
-    float viewMatrixData[16];
-    viewMatrix.Get(viewMatrixData);
-
-    cy::Matrix4<float> modelView = viewMatrix * transformation;
-    cy::Matrix4<float> modelViewPerspective = perspective * modelView;
-
-    cy::Matrix3<float> normalMatrix = modelView.GetSubMatrix3().GetTranspose().GetInverse();
-
-    // std::cout << "Normal Matrix:" << std::endl;
-
-    // float normalMatrixData[9];
-    // normalMatrix.Get(normalMatrixData);
-    // for (int i = 0; i < 3; ++i)
-    // {
-    //     for (int j = 0; j < 3; ++j)
-    //     {
-    //         std::cout << normalMatrixData[i * 3 + j] << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
-    float mvpData[16], normalData[9], mvData[16];
-    modelViewPerspective.Get(mvpData);
-    normalMatrix.Get(normalData);
-    modelView.Get(mvData);
-
-    const GLfloat *mvp = mvpData;
-    const GLfloat *Nmatrix = normalData;
-    const GLfloat *mv = mvData;
-
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
     glUniformMatrix4fv(mvLoc, 1, GL_FALSE, mv);
     glUniformMatrix3fv(mNormLoc, 1, GL_FALSE, Nmatrix);
@@ -235,9 +229,14 @@ void display()
     // Fragment Shader:
     GLint lightPosLoc = glGetUniformLocation(program, "lightPos");
     GLint alphaLoc = glGetUniformLocation(program, "alpha");
+    GLint ambientLoc = glGetUniformLocation(program, "ambient");
 
-    glUniform3f(lightPosLoc, 1.0f, 1.0f, 1.0f);
-    glUniform1f(alphaLoc, 1.0f);
+    glUniform3f(lightPosLoc, 1.0f, 0.0f, 0.0f);
+    glUniform1f(alphaLoc, 60.1f);
+    glUniform3f(ambientLoc, 0.0f, 0.1f, 0.3f);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
 
     glDrawArrays(GL_TRIANGLES,
                  0,
@@ -274,14 +273,19 @@ void mouse(int button, int state, int x, int y)
 void mouseMotion(int x, int y)
 {
     // Handle mouse input
-    if (mouse_down && left_button)
+    if (mouse_down)
     {
-        y_drag += (x - previous_x) * sensitivity;
-        x_drag += (y - previous_y) * sensitivity;
-    }
-    if (mouse_down && !left_button)
-    {
-        z_distance += (x - previous_x);
+        if (left_button)
+        {
+            y_drag += (x - previous_x) * sensitivity;
+            x_drag += (y - previous_y) * sensitivity;
+        }
+        if (!left_button)
+        {
+            z_distance += (x - previous_x);
+        }
+        setMatrices();
+        glutPostRedisplay();
     }
     previous_x = x;
     previous_y = y;
@@ -307,7 +311,7 @@ int main(int argc, char **argv)
     // Create Window
     glutInitWindowSize(700, 700);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
-    glutCreateWindow("A2 - Transformations");
+    glutCreateWindow("A3 - Shading");
 
     // Initialize GLEW
     GLenum err = glewInit();
@@ -329,8 +333,13 @@ int main(int argc, char **argv)
     }
 
     bool ObjectLoaded;
+    cy::TriMesh obj;
     bool status = obj.LoadFromFileObj(filepath.c_str(), true, &std::cout);
     std::cout << status << filepath << std::endl;
+
+    // Send positions and normals
+    init(obj);
+    // setMatrices();
 
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
