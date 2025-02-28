@@ -211,8 +211,6 @@ void init(cy::TriMesh obj)
 
 void display()
 {
-    // setMatrices();
-
     // !RENDERING!
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     // OPENGL CALLS
@@ -339,7 +337,6 @@ int main(int argc, char **argv)
 
     // Send positions and normals
     init(obj);
-    // setMatrices();
 
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
