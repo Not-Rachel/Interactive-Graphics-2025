@@ -1,0 +1,60 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "C:/msys64/ucrt64/bin/g++.exe",
+            "args": [
+                "-fdiagnostics-color=always",
+                "-g",
+                "window.cpp",
+                "lodepng/lodepng.cpp",
+                "-o",
+                "window.exe",
+                "-IC:/msys64/mingw64/include",
+                "-LC:/msys64/mingw64/lib",
+                "-lfreeglut",
+                "-lopengl32",
+                "-lglu32",
+                "-lglew32",
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Generated task for building FreeGLUT program"
+        },
+        {
+            "label": "run",
+            "type": "shell",
+            "command": "${workspaceFolder}/window.exe",
+            "args": [
+                "${input:objFileLocation}"
+            ],
+            "group": {
+                "kind": "none",
+                "isDefault": false
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "build-and-run",
+            "dependsOn": ["build"],
+            "type": "shell",
+            "command": "${workspaceFolder}/window.exe",
+            "args": [
+                "${input:objFileLocation}"
+            ],
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "objFileLocation",
+            "type": "promptString",
+            "description": "File location of your .obj file:"
+        }
+    ]
+}
