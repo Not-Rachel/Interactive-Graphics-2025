@@ -30,9 +30,10 @@ float z_distance = 50.0f, plane_z_distance = 50.0f;
 
 float sensitivity = 0.005;
 
-int num_vertices;
-GLfloat light_x = 1.0f;
-GLfloat light_y;
+cy::TriMesh ObjectObj;
+cy::TriMesh lightObj;
+GLfloat light_x = 10.0f;
+GLfloat light_y = 10.0f;
 GLfloat light_z;
 
 cyGLRenderTexture2D render_buffer;
@@ -52,9 +53,12 @@ GLuint shadow_program;
 cy::GLSLProgram teapotProgram;
 cy::GLSLProgram planeProgram;
 cy::GLSLProgram lightProgram;
+cy::GLSLProgram shadowProgram;
 cy::GLSLProgram envProgram;
 
 GLfloat mvp[16];
+GLfloat mlp[16];
+GLfloat matShadow[16];
 GLfloat mv[16];
 GLfloat vp[16];
 GLfloat model[16];
@@ -71,9 +75,11 @@ GLfloat vp_plane[16];
 cy::Matrix4<float> perspective;
 cy::Matrix4<float> viewMatrix;
 
-void renderObject();
+void renderObject(GLuint program, GLuint VAO, int num_vertices);
 void setObjectUniform();
 void setMatrices();
+void setLightMatrices();
+
 
 GLchar *ReadFromFile(const char *file)
 {
@@ -112,7 +118,6 @@ void setTextures(cy::TriMesh obj)
     }
     else // Get material
     {
-
         // Decode PNG image from file
         unsigned error = lodepng::decode(image_kd, width_kd, height_kd, std::string(material.map_Kd.data));
         if (error)
@@ -125,13 +130,11 @@ void setTextures(cy::TriMesh obj)
         if (error_ks)
         {
             std::cerr << "KS decoder error " << error_ks << ": " << std::endl;
-            return;
+            
         }
     }
 
     glActiveTexture(GL_TEXTURE0);
-
-    // Alternative setup
     cyGLTexture2D tex_kd;
     tex_kd.Initialize();
     tex_kd.SetImage(image_kd.data(), 4, width_kd, height_kd);
@@ -145,16 +148,13 @@ void setTextures(cy::TriMesh obj)
     tex_ks.BuildMipmaps();
     tex_ks.Bind(1);
 }
-void setObjectVertices(cy::TriMesh obj)
+void setObjectVertices(cy::TriMesh obj, GLuint program, GLuint VAO)
 {
     // object_program = LoadShader("shader.vert", "shader.frag");
-    teapotProgram.BuildFiles("shader.vert", "shader.frag");
-    object_program = teapotProgram.GetID();
-
-    // Vertex array object
-    glGenVertexArrays(1, &VAO);
     glBindVertexArray(VAO);
 
+    glUseProgram(program);
+   
     // Vertex Buffer Object
     std::vector<GLfloat> positions;
     std::vector<GLfloat> normals;
@@ -206,7 +206,6 @@ void setObjectVertices(cy::TriMesh obj)
         textures.push_back(tex3.x);
         textures.push_back(tex3.y);
     }
-    num_vertices = obj.NF() * 3;
 
     // POSITIONS BUFFER
     GLuint buffer;
@@ -215,7 +214,7 @@ void setObjectVertices(cy::TriMesh obj)
     glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(GLfloat),
                  positions.data(),
                  GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint pos = glGetAttribLocation(object_program, "pos");
+    GLuint pos = glGetAttribLocation(program, "pos");
     glEnableVertexAttribArray(pos);
     glVertexAttribPointer( // How to interpret data
         pos, 3, GL_FLOAT,  // Will use previously binded buffer, 3d vector of floats
@@ -228,7 +227,7 @@ void setObjectVertices(cy::TriMesh obj)
     glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat),
                  normals.data(),
                  GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint normal = glGetAttribLocation(object_program, "normal");
+    GLuint normal = glGetAttribLocation(program, "normal");
     glEnableVertexAttribArray(normal);
     glVertexAttribPointer(   // How to interpret data
         normal, 3, GL_FLOAT, // Will use previously binded buffer, 3d vector of floats
@@ -241,7 +240,7 @@ void setObjectVertices(cy::TriMesh obj)
     glBufferData(GL_ARRAY_BUFFER, textures.size() * sizeof(GLfloat),
                  textures.data(),
                  GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint tex = glGetAttribLocation(object_program, "txc");
+    GLuint tex = glGetAttribLocation(program, "txc");
     glEnableVertexAttribArray(tex);
     glVertexAttribPointer( // How to interpret data
         tex, 2, GL_FLOAT,  // Will use previously binded buffer, 3d vector of floats
@@ -250,116 +249,12 @@ void setObjectVertices(cy::TriMesh obj)
     // Set final texture with render buffer
     // renderObject();
     glUseProgram(0);
+
 }
-void setLightVertices(cy::TriMesh obj)
-{
-    // object_program = LoadShader("shader.vert", "shader.frag");
-    lightProgram.BuildFiles("light.vert", "light.frag");
-    light_program = lightProgram.GetID();
 
-    // Vertex array object
-    glGenVertexArrays(1, &VAO);
-    glBindVertexArray(VAO);
-
-    // Vertex Buffer Object
-    std::vector<GLfloat> positions;
-    std::vector<GLfloat> normals;
-    std::vector<GLfloat> textures;
-    obj.ComputeNormals(false);
-
-    for (unsigned int i = 0; i < obj.NF(); ++i)
-    {
-        cy::TriMesh::TriFace &face = obj.F(i);
-        cy::Vec3f &vertex1 = obj.V(face.v[0]);
-        cy::Vec3f &vertex2 = obj.V(face.v[1]);
-        cy::Vec3f &vertex3 = obj.V(face.v[2]);
-
-        positions.push_back(vertex1.x);
-        positions.push_back(vertex1.y);
-        positions.push_back(vertex1.z);
-        positions.push_back(vertex2.x);
-        positions.push_back(vertex2.y);
-        positions.push_back(vertex2.z);
-        positions.push_back(vertex3.x);
-        positions.push_back(vertex3.y);
-        positions.push_back(vertex3.z);
-
-        // Vertex Normals
-        cy::Vec3f &normal1 = obj.VN(face.v[0]);
-        cy::Vec3f &normal2 = obj.VN(face.v[1]);
-        cy::Vec3f &normal3 = obj.VN(face.v[2]);
-
-        normals.push_back(normal1.x);
-        normals.push_back(normal1.y);
-        normals.push_back(normal1.z);
-        normals.push_back(normal2.x);
-        normals.push_back(normal2.y);
-        normals.push_back(normal2.z);
-        normals.push_back(normal3.x);
-        normals.push_back(normal3.y);
-        normals.push_back(normal3.z);
-
-        // TEXTURE COORDINATES
-        cy::TriMesh::TriFace &texface = obj.FT(i);
-        cy::Vec3f &tex1 = obj.VT(texface.v[0]);
-        cy::Vec3f &tex2 = obj.VT(texface.v[1]);
-        cy::Vec3f &tex3 = obj.VT(texface.v[2]);
-
-        textures.push_back(tex1.x);
-        textures.push_back(tex1.y);
-        textures.push_back(tex2.x);
-        textures.push_back(tex2.y);
-        textures.push_back(tex3.x);
-        textures.push_back(tex3.y);
-    }
-    num_vertices = obj.NF() * 3;
-
-    // POSITIONS BUFFER
-    GLuint buffer;
-    glGenBuffers(1, &buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, buffer); // Bind something, all buffer operations will use this buffer
-    glBufferData(GL_ARRAY_BUFFER, positions.size() * sizeof(GLfloat),
-                 positions.data(),
-                 GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint pos = glGetAttribLocation(object_program, "pos");
-    glEnableVertexAttribArray(pos);
-    glVertexAttribPointer( // How to interpret data
-        pos, 3, GL_FLOAT,  // Will use previously binded buffer, 3d vector of floats
-        GL_FALSE, 0, (GLvoid *)0);
-
-    // NORMAL BUFFER
-    GLuint normalBuffer;
-    glGenBuffers(1, &normalBuffer);
-    glBindBuffer(GL_ARRAY_BUFFER, normalBuffer); // Bind something, all buffer operations will use this buffer
-    glBufferData(GL_ARRAY_BUFFER, normals.size() * sizeof(GLfloat),
-                 normals.data(),
-                 GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint normal = glGetAttribLocation(object_program, "normal");
-    glEnableVertexAttribArray(normal);
-    glVertexAttribPointer(   // How to interpret data
-        normal, 3, GL_FLOAT, // Will use previously binded buffer, 3d vector of floats
-        GL_FALSE, 0, (GLvoid *)0);
-
-    // TEXTURE BUFFER
-    GLuint textureBuffer;
-    glGenBuffers(1, &textureBuffer);
-    glBindBuffer(GL_ARRAY_BUFFER, textureBuffer); // Bind something, all buffer operations will use this buffer
-    glBufferData(GL_ARRAY_BUFFER, textures.size() * sizeof(GLfloat),
-                 textures.data(),
-                 GL_STATIC_DRAW); // Not planning to modify data frequently
-    GLuint tex = glGetAttribLocation(object_program, "txc");
-    glEnableVertexAttribArray(tex);
-    glVertexAttribPointer( // How to interpret data
-        tex, 2, GL_FLOAT,  // Will use previously binded buffer, 3d vector of floats
-        GL_FALSE, 0, (GLvoid *)0);
-
-    // Set final texture with render buffer
-    // renderObject();
-    glUseProgram(0);
-}
 void setCubeMap()
 {
-    envProgram.BuildFiles("environment.vert", "environment.frag");
+    envProgram.BuildFiles("shaders/environment.vert", "shaders/environment.frag");
     env_program = envProgram.GetID();
 
     cy::GLTextureCubeMap envmap;
@@ -424,13 +319,7 @@ cy::Matrix4<float> getRotation(float x_drag, float y_drag)
 }
 void initRenderPlane()
 {
-    // render_buffer.Initialize(
-    //     true, // Do you need a depth buffer, creates depth buffer
-    //     3,    // RGB
-    //     700,
-    //     700);
-    // plane_program = LoadShader("plane.vert", "plane.frag");
-    planeProgram.BuildFiles("plane.vert", "plane.frag");
+    planeProgram.BuildFiles("shaders/plane.vert", "shaders/plane.frag");
     plane_program = planeProgram.GetID();
 
     glGenVertexArrays(1, &plane_VAO);
@@ -438,13 +327,13 @@ void initRenderPlane()
 
     GLfloat plane_vertices[] = {
         // Triangle 1
-        -20.0f, 0.0f, 20.0f,
-        -20.0f, 0.0f, -20.0f,
-        20.0f, 0.0f, -20.0f,
+        -50.0f, 0.0f, 50.0f,
+        -50.0f, 0.0f, -50.0f,
+        50.0f, 0.0f, -50.0f,
         // Triangle 2
-        -20.0f, 0.0f, 20.0f,
-        20.0f, 0.0f, -20.0f,
-        20.0f, 0.0f, 20.0f};
+        -50.0f, 0.0f, 50.0f,
+        50.0f, 0.0f, -50.0f,
+        50.0f, 0.0f, 50.0f};
 
     GLfloat texCoords[] = {
         0.0f, 1.0f,
@@ -478,64 +367,135 @@ void initRenderPlane()
     glBindVertexArray(0); // Unbind
     glUseProgram(0);
 }
-void init(cy::TriMesh obj)
+void init()
 {
     perspective.SetPerspective(1.0472f, 1.0f, 0.1f, 1000.0f);
     viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
 
     (perspective * viewMatrix * getRotation(plane_x_drag, plane_y_drag)).GetInverse().Get(vp_plane);
 
-    setTextures(obj);
-    setObjectVertices(obj);
-    setMatrices();
-    setObjectUniform();
-    setCubeMap();
-}
-void renderDepthMap()
-{
-    // Just for rendering the shadow
-    shadow_program = glCreateProgram(); // Fragment shader gets thrown out, not used at all
+    //Load shaders and VAOs
+    teapotProgram.BuildFiles("shaders/shader.vert", "shaders/shader.frag");
+    object_program = teapotProgram.GetID();
+    glGenVertexArrays(1, &VAO);
 
-    // Frame buffer
+    // For light bulb rendering
+    lightProgram.BuildFiles("shaders/light.vert", "shaders/light.frag");
+    light_program = lightProgram.GetID();
+    glGenVertexArrays(1, &light_VAO);
+
+
+    setObjectVertices(ObjectObj, object_program, VAO);
+    setObjectVertices(lightObj, light_program, light_VAO);
+
+    setMatrices();
+    setLightMatrices();
+
+    setTextures(ObjectObj);
+    setObjectUniform();
+
+    // setTextures(lightObj);
+    glUniform1i(glGetUniformLocation(object_program, "renderedTexture"), 0);  // Get texture from texture unit
+
+    setCubeMap();
+
+    //Shadows
+    // Render to Depth Texture
+    shadowProgram.BuildFiles("shaders/depth.vert", "shaders/depth.frag");
+    shadow_program = shadowProgram.GetID();
+    // // Frame buffer
     shadowMap.Initialize(
         true, // Do you need a depth buffer, creates depth buffer
         700,
-        700); // Use default depth component
+        700); 
 
     shadowMap.SetTextureFilteringMode(GL_LINEAR, GL_LINEAR);
-    shadowMap.Bind();
-    glClear(GL_DEPTH_BUFFER_BIT);
-    glUseProgram(shadow_program);
-    // glUniformMatrix4fv(glGetUniformLocation(shadow_program, "mvp"), 1, GL_FALSE, mlp);
-    // Create depth texture
-    // Configure frame buffer
-    // glDrawArrays(...);
-    shadowMap.Unbind();
 
-    // When creating the matrixshadow (T * S(0.5 uniform) * M(mlp)) add bias to T (0.5,0.5,0.5 - bias)
 }
-void setShadowMatrices()
+
+void setLightMatrices()
 {
+    glUseProgram(light_program);
+    cy::Matrix4<float> rotation = getRotation(x_drag, y_drag);
+    cy::Vec3f lightPos(light_x, light_y, light_z);
+    cy::Vec3f origin(0.0f,0.0f,0.0f);
+    // Translation matrix to move the light object to the light's position
+    cy::Matrix4<float> translation;
+    translation.SetTranslation(lightPos);
+
+    cy::Matrix3<float> rotateToOrigin;
+    rotateToOrigin.SetRotation(lightPos.GetNormalized(), (origin - lightPos).GetNormalized());
+    cy::Matrix4<float> rotateToOrigin4(rotateToOrigin);
+
+
+
+    // Combine rotation and translation to form the final model matrix for the light object
+    cy::Matrix4<float> modelMatrix = translation * rotateToOrigin4;
+
+    cy::Matrix4<float> viewMatrix;
+    // Use the calculated camera position
+    viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, z_distance), origin, cy::Vec3f(0.0f, 1.0f, 0.0f));
+    viewMatrix = viewMatrix * rotation;
+    cy::Matrix4<float> modelViewProjection = perspective * viewMatrix * modelMatrix;
+
+    GLfloat mvp_light[16];
+    modelViewProjection.Get(mvp_light);
+    glUniformMatrix4fv(glGetUniformLocation(light_program, "mvp"), 1, GL_FALSE, mvp_light);
+
+    glUseProgram(0);
 }
 void setMatrices()
 {
     cy::Matrix4<float> rotation = getRotation(x_drag, y_drag);
+    cy::Matrix4<float> rotationCamera = getRotation(x_drag, -y_drag);
     cy::Matrix4<float> rotation_plane = getRotation(plane_x_drag, plane_y_drag);
 
-    cy::Matrix4<float> viewMatrix;
-    // Use the calculated camera position
-    viewMatrix.SetView(cy::Vec3f(0.0f, 0.0f, z_distance), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
+    cy::Vec3f origin(0.0f,0.0f,0.0f);
+    // Translation matrix to move the light object to the light's position
+      // Update spherical angles based on drag input
+      
+    // float theta = -y_drag;
+    // float phi = -x_drag; // Subtract to invert vertical dragging direction
 
+    // // spherical to cartesian 
+    // float camera_x = z_distance * sin(phi) * cos(theta);
+    // float camera_y = z_distance * sin(phi) * sin(theta);
+    // float camera_z = z_distance * cos(phi);
+
+    // cy::Vec3f camera(camera_x, camera_y, camera_z);
+
+ 
+    cy::Matrix4<float> translation;
+    translation.SetTranslation(cy::Vec3f(0.0f,0.0f,z_distance));
+    cy::Matrix4<float> viewMatrix = translation * rotationCamera;
+    // cy::Matrix4<float> invViewMatrix = viewMatrix.GetInverse(); // Inverse the view matrix
+    cy::Vec3f cameraPosition(viewMatrix.GetInverse().GetTranslation());
+    GLfloat camera_coords[3]; // Assuming a 4x4 matrix
+    cameraPosition.Get(camera_coords);
+    std::cout << " XYZ :" << std::endl;
+    std::cout << camera_coords[0] << std::endl;
+    std::cout <<  camera_coords[1] << std::endl;
+    std::cout <<  camera_coords[2] << std::endl;
+    // cy::Matrix4<float> viewMatrix;
+    viewMatrix.SetView(cameraPosition, origin, cy::Vec3f(0.0f, 1.0f, 0.0f)); //Camera orbits the origin
     // Look at the object from the perspective of the light:
     cy::Matrix4<float> lightMatrix;
-    lightMatrix.SetView(cy::Vec3f(light_x, light_y, light_y), cy::Vec3f(0.0f, 0.0f, 0.0f), cy::Vec3f(0.0f, 1.0f, 0.0f));
+    lightMatrix.SetView(cy::Vec3f(light_x, light_y, light_y), origin, cy::Vec3f(0.0f, 1.0f, 0.0f));
 
     cy::Matrix4<float> modelMatrix = rotation_plane;
-    cy::Matrix4<float> modelView = viewMatrix * rotation * modelMatrix;
+    cy::Matrix4<float> modelView = viewMatrix * modelMatrix;
     cy::Matrix4<float> modelViewProjection = perspective * modelView;
     cy::Matrix4<float> modelLightProjection = perspective * lightMatrix * modelMatrix;
-    cy::Matrix3<float> normalMatrix = modelView.GetSubMatrix3().GetTranspose().GetInverse();
+    cy::Matrix3<float> normalMatrix = modelView.GetSubMatrix3().GetInverse().GetTranspose();
     cy::Matrix4<float> viewProjection = perspective * rotation;
+
+    // T * S * MLP
+    float bias = 0.001f;
+    cy::Matrix4<float> scale;
+    scale.SetScale(0.5);
+    cy::Matrix4<float> translate;
+    scale.SetTranslation(cy::Vec3f(0.5,0.5,0.5 - bias));
+    cy::Matrix4<float> matrixShadow =translate * scale * modelLightProjection;
 
     modelViewProjection.Get(mvp);
     viewProjection.GetInverse().Get(vp);
@@ -543,22 +503,28 @@ void setMatrices()
     modelView.Get(mv);
     modelMatrix.Get(model);
     viewMatrix.Get(view);
+    modelLightProjection.Get(mlp); //For depth map
+    matrixShadow.Get(matShadow);
 
     glUseProgram(object_program);
 
     glUniformMatrix4fv(glGetUniformLocation(object_program, "mvp"), 1, GL_FALSE, mvp);
-    glUniformMatrix4fv(glGetUniformLocation(object_program, "mv"), 1, GL_FALSE, mv);
     glUniformMatrix4fv(glGetUniformLocation(object_program, "view"), 1, GL_FALSE, view);
     glUniformMatrix3fv(glGetUniformLocation(object_program, "mNorm"), 1, GL_FALSE, normal);
     glUniformMatrix3fv(glGetUniformLocation(object_program, "model"), 1, GL_FALSE, model);
 
-    GLint lightPosLoc = glGetUniformLocation(object_program, "lightPos");
-    GLint cameraLoc = glGetUniformLocation(object_program, "camera");
-    glUniform3f(lightPosLoc, light_x, light_y, light_z);
-    glUniform3f(cameraLoc, view[12], view[13], view[14]);
-
+    glUniform3f(glGetUniformLocation(object_program, "lightPos"), light_x, light_y, light_z);
+    glUniform3f(glGetUniformLocation(object_program, "camera"), camera_coords[0], camera_coords[1], camera_coords[2]);
     glUseProgram(0);
 
+    glUseProgram(shadow_program);
+    glUniformMatrix4fv(glGetUniformLocation(shadow_program, "mvp"), 1, GL_FALSE, mlp);
+    glUseProgram(0);
+
+    glUseProgram(plane_program);
+    glUniformMatrix3fv(glGetUniformLocation(plane_program, "matrixShadow"), 1, GL_FALSE, matShadow);
+    glUniformMatrix4fv(glGetUniformLocation(plane_program, "mvp"), 1, GL_FALSE, mvp);
+    glUseProgram(0);
     // Convert to Light space World -> Light space ->Canonical view volume (Model-Light-Projection Matrix)
     // Two canonical view volume
 }
@@ -580,10 +546,9 @@ void setObjectUniform()
 
     glUseProgram(0);
 }
-void renderObject()
+void renderObject(GLuint program, GLuint VAO, int num_vertices)
 {
-    glUseProgram(object_program);
-
+    glUseProgram(program);
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES,
                  0,
@@ -593,10 +558,9 @@ void renderObject()
 }
 void display()
 {
-    // Get the rendered object
-    // render_buffer.Bind();
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
 
     // Draw CubeMap
     glDepthMask(GL_FALSE);
@@ -614,33 +578,27 @@ void display()
     glBindVertexArray(0);
     glUseProgram(0);
     glDepthMask(GL_TRUE);
-
-    // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // // !RENDERING!
     glClear(GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
 
-    renderObject(); // Bind and unbind and draw obj
-    // render_buffer.Unbind();
+    //Render the depthmap:
+    shadowMap.Bind();
+    glClear(GL_DEPTH_BUFFER_BIT);
+    renderObject(shadow_program, VAO, ObjectObj.NF() * 3); // Bind and unbind and draw obj
+    shadowMap.Unbind();
 
-    // // Draw Plane
-    // glClear(GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-
+    // Draw Objects...
+    // render_buffer.Bind();
+    glActiveTexture(GL_TEXTURE4);
+    shadowMap.BindTexture(4);
     glUseProgram(plane_program);
+    glUniform1i(glGetUniformLocation(plane_program, "shadow"), 4);
 
-    GLint planeMvpLoc = glGetUniformLocation(plane_program, "mvp");
-    glUniformMatrix4fv(planeMvpLoc, 1, GL_FALSE, mvp);
-    // glUniform1i(glGetUniformLocation(plane_program, "renderedTexture"), 2); // Render previously loaded object as a texture and set to texture unit 0
+    // renderObject(plane_program, plane_VAO, 6);
+    renderObject(object_program, VAO, ObjectObj.NF() * 3); // Bind and unbind and draw obj
+    renderObject(light_program, light_VAO, lightObj.NF() * 3); // Bind and unbind and draw obj
 
-    glBindVertexArray(plane_VAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6); // Draw the plane
-    glBindVertexArray(0);
-
+    // render_buffer.Unbind();
     glDepthMask(GL_FALSE);    // Disable depth writing
-    glDisable(GL_DEPTH_TEST); // Disable depth testing
 
     glutSwapBuffers();
 }
@@ -664,6 +622,7 @@ void keyboard(unsigned char key, int x, int y)
         plane_x_drag = 0.0f;
         plane_y_drag = 0.0f;
         setMatrices();
+        setLightMatrices();
         break;
 
     default:
@@ -740,6 +699,8 @@ void mouseMotion(int x, int y)
             }
         }
         setMatrices();
+        setLightMatrices();
+
         glutPostRedisplay();
     }
     previous_x = x;
@@ -767,7 +728,7 @@ int main(int argc, char **argv)
     // Create Window
     glutInitWindowSize(700, 700);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
-    glutCreateWindow("A5 - Render Buffers");
+    glutCreateWindow("A7 - Shadow Mapping");
 
     // Initialize GLEW
     GLenum err = glewInit();
@@ -789,13 +750,16 @@ int main(int argc, char **argv)
     }
 
     bool ObjectLoaded;
-    cy::TriMesh obj;
-    bool status = obj.LoadFromFileObj(filepath.c_str(), true, &std::cout);
-    std::cout << status << filepath << std::endl;
+    bool status = ObjectObj.LoadFromFileObj(filepath.c_str(), true, &std::cout);
+    std::cout << status << " " << filepath << std::endl;
+
+    bool lightLoaded;
+    bool statusLight = lightObj.LoadFromFileObj("light.obj", true, &std::cout);
+    std::cout << statusLight << " light.obj" << std::endl;
 
     // Send positions and normals
     initRenderPlane(); // Create plane shaders
-    init(obj);         // Creat obj shaders
+    init();         // Creat obj shaders
 
     // glUseProgram(object_program);
 
